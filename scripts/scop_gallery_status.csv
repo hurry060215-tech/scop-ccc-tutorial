@@ -13,6 +13,7 @@
 "circle",TRUE,""
 "circle_focused",TRUE,""
 "chord",TRUE,""
+"lr_chord",TRUE,""
 "gene_chord",TRUE,""
 "pathway",TRUE,""
 "individual_lr",TRUE,""
@@ -22,6 +23,7 @@
 "arrow",TRUE,""
 "sigmoid",TRUE,""
 "bipartite",TRUE,""
+"embedding_network",TRUE,""
 "diffusion",FALSE,"""plot_type = 'diffusion'"" has no direct R backend in scop; use
 ""plot_type = 'circle'"" or ""plot_type = 'diff_network'"""
 "bar",TRUE,""

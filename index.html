@@ -17,6 +17,7 @@
       <a href="#overview">总览</a>
       <a href="#logic">分析逻辑</a>
       <a href="#methods">方法选择</a>
+      <a href="#codewalk">代码式讲解</a>
       <a href="#liana">LIANA 深入说明</a>
       <a href="#parameters">参数字典</a>
       <a href="#sources">方法来源</a>
@@ -77,6 +78,319 @@
           <tr><td><code>RunscOMM()</code></td><td>给 query 细胞预测身份标签</td><td>准备可靠 <code>group.by</code>，不是 L-R 推断</td><td>metadata + <code>srt@tools[["scOMM"]]</code></td></tr>
         </tbody>
       </table>
+    </section>
+
+    <section id="codewalk">
+      <h2>代码式讲解</h2>
+      <p>
+        这一节按真实分析顺序写：先把细胞身份定准，再选通讯后端，最后用同一套 <code>CCC*</code> 函数解释。
+        每段代码旁边都说明它回答的生物学问题。
+      </p>
+
+      <div class="method-block">
+        <div>
+          <h3>0. 先确认 group.by：通讯分析的地基</h3>
+          <p>
+            CCC 的 sender 和 receiver 都来自 <code>group.by</code>。如果这个列是错误注释、过细 cluster 或有太多小群，
+            后面的 ligand-receptor 结果会跟着偏。
+          </p>
+          <ul class="note-list">
+            <li>生物学含义：把单个细胞归成能解释功能的群体，例如 beta cell、macrophage、ductal cell。</li>
+            <li>最小检查：每个群有足够细胞，marker 表达合理，实验条件和样本 ID 没混。</li>
+          </ul>
+          <details>
+            <summary>关键参数怎么理解</summary>
+            <div class="details-body">
+              <table>
+                <tbody>
+                  <tr><td><code>group.by</code></td><td>决定“谁发信、谁收信”的 metadata 列；推荐用人工校正后的细胞类型。</td></tr>
+                  <tr><td><code>assay/layer</code></td><td>决定使用哪套表达矩阵；大多数通讯方法应使用 normalized data。</td></tr>
+                  <tr><td><code>sample.by</code></td><td>多样本方法需要真实 biological sample，不要填细胞 barcode。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+        <pre><code class="language-r">library(scop)
+library(Seurat)
+
+data("pancreas_sub", package = "scop")
+srt <- pancreas_sub
+
+stopifnot("CellType" %in% colnames(srt@meta.data))
+srt$CellType <- factor(srt$CellType)
+table(srt$CellType)
+
+# 可选：确认 marker 和低维图是否支持这个注释
+DimPlot(srt, group.by = "CellType", label = TRUE)</code></pre>
+      </div>
+
+      <div class="method-block">
+        <div>
+          <h3>1. RunscOMM(): 先把细胞标签做稳</h3>
+          <p>
+            <code>RunscOMM()</code> 不是通讯推断，它是 reference-to-query 标签预测。它出现在 CCC 教程里，是因为通讯分析对细胞身份极其敏感：
+            sender/receiver 分错，所有 L-R 边都会变。
+          </p>
+          <ul class="note-list">
+            <li>生物学问题：query 细胞最像 reference 里的哪类细胞？罕见细胞有没有被识别出来？</li>
+            <li>结果用途：把预测标签写入 metadata，再作为 <code>RunLIANA()</code>、<code>RunCellChat()</code> 的 <code>group.by</code>。</li>
+          </ul>
+          <details>
+            <summary>关键参数怎么理解</summary>
+            <div class="details-body">
+              <table>
+                <tbody>
+                  <tr><td><code>reference</code></td><td>带可信标签的参考对象，相当于“答案书”。</td></tr>
+                  <tr><td><code>reference_label</code></td><td>参考对象中的标签列，例如 <code>CellType</code>。</td></tr>
+                  <tr><td><code>features</code></td><td>用于分类的基因；为空时由函数自动选择。</td></tr>
+                  <tr><td><code>prediction_prefix</code></td><td>预测列名前缀，避免覆盖已有 metadata。</td></tr>
+                  <tr><td><code>evaluate/truth_col</code></td><td>query 有真实标签时评估准确率和 rare recall。</td></tr>
+                  <tr><td><code>scomm_epochs</code></td><td>神经网络训练轮数；教学可小，正式分析可增加并检查稳定性。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+        <pre><code class="language-r">query <- RunscOMM(
+  srt = query,
+  reference = reference,
+  reference_assay = "RNA",
+  query_assay = "RNA",
+  reference_label = "CellType",
+  prediction_prefix = "predicted_",
+  scomm_epochs = 10
+)
+
+table(query$predicted_CellType)
+query$CellType <- query$predicted_CellType</code></pre>
+      </div>
+
+      <div class="method-block">
+        <div>
+          <h3>2. RunLIANA(): 第一轮广筛 L-R 候选</h3>
+          <p>
+            <code>RunLIANA()</code> 最适合作为入门起点。它把多个 L-R 评分思路统一到一张长表里，
+            适合先看“哪些细胞对”和“哪些 L-R 对”反复被支持。
+          </p>
+          <ul class="note-list">
+            <li>生物学问题：哪些细胞群之间可能存在较强信号交流？哪些 ligand-receptor 候选最稳？</li>
+            <li>读图顺序：先 <code>heatmap/circle</code> 看细胞对，再 <code>dot/bar</code> 下钻到 L-R 对。</li>
+          </ul>
+          <details>
+            <summary>关键参数怎么理解</summary>
+            <div class="details-body">
+              <table>
+                <tbody>
+                  <tr><td><code>method</code></td><td>LIANA 内部参与评分的方法；<code>natmi/connectome/logfc/sca/cellphonedb</code> 从不同角度给候选排序。</td></tr>
+                  <tr><td><code>resource</code></td><td>L-R 数据库资源；<code>Consensus</code> 是稳妥默认值。</td></tr>
+                  <tr><td><code>min_cells</code></td><td>每个细胞群最低细胞数，像“最低证据人数”。</td></tr>
+                  <tr><td><code>return_all</code></td><td>是否返回未通过筛选的候选；新手建议 <code>FALSE</code>。</td></tr>
+                  <tr><td><code>...</code></td><td>传给 LIANA 后端的高级参数，复现实验时再精细设置。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+        <pre><code class="language-r">srt <- RunLIANA(
+  srt,
+  group.by = "CellType",
+  method = c("natmi", "connectome", "logfc", "sca", "cellphonedb"),
+  resource = "Consensus",
+  min_cells = 5,
+  return_all = FALSE
+)
+
+CCCHeatmap(srt, method = "LIANA",
+  plot_type = "heatmap", display_by = "aggregation")
+CCCHeatmap(srt, method = "LIANA",
+  plot_type = "dot", display_by = "interaction", top_n = 30)</code></pre>
+      </div>
+
+      <div class="method-block">
+        <div>
+          <h3>3. RunCellphoneDB(): 用置换检验看显著 L-R 对</h3>
+          <p>
+            <code>RunCellphoneDB()</code> 适合需要对齐 CellPhoneDB 文献流程的分析。它的核心思想是：
+            真实细胞标签下的 L-R 表达组合，是否比随机打乱标签更突出。
+          </p>
+          <ul class="note-list">
+            <li>生物学问题：某个 sender-receiver 组合里的 L-R 对是否具有统计支持？</li>
+            <li>解释重点：<code>score</code> 看表达支持，<code>pvalue</code> 看置换检验显著性。</li>
+          </ul>
+          <details>
+            <summary>关键参数怎么理解</summary>
+            <div class="details-body">
+              <table>
+                <tbody>
+                  <tr><td><code>method</code></td><td><code>statistical_analysis</code> 做置换检验；<code>analysis</code> 更快但统计支持弱；<code>degs_analysis</code> 结合 DEG。</td></tr>
+                  <tr><td><code>convert_to_human</code></td><td>小鼠数据接 CellPhoneDB 时通常设 <code>TRUE</code>，转换到人类同源基因。</td></tr>
+                  <tr><td><code>threshold</code></td><td>某基因在细胞群内表达细胞比例的下限。</td></tr>
+                  <tr><td><code>pvalue</code></td><td>显著性阈值，越小越严格。</td></tr>
+                  <tr><td><code>iterations</code></td><td>置换次数；越大越稳但更慢。</td></tr>
+                  <tr><td><code>microenvs</code></td><td>限制哪些细胞群可互相通讯，空间/组织区域分析很有用。</td></tr>
+                  <tr><td><code>cores</code></td><td>并行核数，影响运行速度。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+        <pre><code class="language-r">srt <- RunCellphoneDB(
+  srt,
+  group.by = "CellType",
+  species = "Mus_musculus",
+  method = "statistical_analysis",
+  convert_to_human = TRUE,
+  threshold = 0.1,
+  pvalue = 0.05,
+  iterations = 1000,
+  cores = 4
+)
+
+CCCHeatmap(srt, method = "CellphoneDB",
+  plot_type = "bubble_lr", display_by = "interaction",
+  pairLR.use = c("Jag1-Notch1", "Wnt5a-Fzd2"))</code></pre>
+      </div>
+
+      <div class="method-block">
+        <div>
+          <h3>4. RunCellChat(): 看 pathway 网络和细胞角色</h3>
+          <p>
+            <code>RunCellChat()</code> 更偏“通讯网络生态学”：它不仅保留 L-R 对，还会聚合到 signaling pathway，
+            并分析哪个细胞更像发送者、接收者或网络 hub。
+          </p>
+          <ul class="note-list">
+            <li>生物学问题：WNT、NOTCH、CXCL 等通路主要从哪里发出，流向哪里？处理组和对照组网络是否改变？</li>
+            <li>读图顺序：先看 <code>circle</code> 总网络，再用 <code>pathway</code> 或 <code>lr_contribution</code> 解释具体通路。</li>
+          </ul>
+          <details>
+            <summary>关键参数怎么理解</summary>
+            <div class="details-body">
+              <table>
+                <tbody>
+                  <tr><td><code>species</code></td><td>选择 CellChat 数据库物种：人、小鼠或斑马鱼。</td></tr>
+                  <tr><td><code>split.by</code></td><td>先按某列拆分后分别分析，适合分条件运行。</td></tr>
+                  <tr><td><code>annotation_selected</code></td><td>只保留指定细胞类型，适合聚焦某个生态位。</td></tr>
+                  <tr><td><code>group_column/group_cmp</code></td><td>条件比较设计，例如 treated vs control。</td></tr>
+                  <tr><td><code>thresh</code></td><td>CellChat 通讯显著性过滤阈值。</td></tr>
+                  <tr><td><code>min.cells</code></td><td>细胞群最低细胞数，太小的群会被排除。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+        <pre><code class="language-r">srt <- RunCellChat(
+  srt,
+  group.by = "CellType",
+  species = "Mus_musculus",
+  min.cells = 10,
+  thresh = 0.05
+)
+
+CCCNetworkPlot(srt, method = "CellChat",
+  plot_type = "circle", display_by = "aggregation")
+CCCStatPlot(srt, method = "CellChat",
+  plot_type = "lr_contribution", signaling = "NOTCH")</code></pre>
+      </div>
+
+      <div class="method-block">
+        <div>
+          <h3>5. RunNichenetr(): 从 receiver 基因程序倒推 ligand</h3>
+          <p>
+            <code>RunNichenetr()</code> 的问题更进一步：不是只问 ligand 和 receptor 是否共表达，
+            而是问 sender 里的哪些 ligand 最能解释 receiver 细胞中的目标基因变化。
+          </p>
+          <ul class="note-list">
+            <li>生物学问题：某个接收细胞状态改变，可能由哪些外源 ligand 驱动？</li>
+            <li>最佳图：<code>ligand_target</code>，把候选 ligand 和 receiver target genes 连起来。</li>
+          </ul>
+          <details>
+            <summary>关键参数怎么理解</summary>
+            <div class="details-body">
+              <table>
+                <tbody>
+                  <tr><td><code>receiver</code></td><td>要解释的接收细胞群，是 NicheNet 的核心锚点。</td></tr>
+                  <tr><td><code>sender</code></td><td>候选发送细胞群；<code>"all"</code> 表示全部非 receiver 群。</td></tr>
+                  <tr><td><code>condition.by/condition_oi/condition_reference</code></td><td>定义 receiver 中的差异表达背景。</td></tr>
+                  <tr><td><code>mode</code></td><td><code>aggregate</code> 做条件差异；<code>custom</code> 使用自定义目标基因集。</td></tr>
+                  <tr><td><code>geneset</code></td><td>自定义 receiver target genes，例如 DEG 或通路基因。</td></tr>
+                  <tr><td><code>top_n_ligands/top_n_targets</code></td><td>控制优先展示多少 ligand 和 target。</td></tr>
+                  <tr><td><code>lr_network/ligand_target_matrix</code></td><td>传入自定义 NicheNet 先验模型。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+        <pre><code class="language-r">geneset_oi <- c("Ins1", "Ins2", "Gcg", "Pdx1", "Mafa")
+
+srt <- RunNichenetr(
+  srt,
+  group.by = "CellType",
+  receiver = "Endocrine",
+  sender = "all",
+  mode = "custom",
+  geneset = geneset_oi,
+  background_expressed_genes = rownames(srt),
+  species = "Mus_musculus",
+  top_n_ligands = 30,
+  top_n_targets = 200
+)
+
+CCCHeatmap(srt, method = "Nichenetr",
+  plot_type = "ligand_target", top_n = 30)</code></pre>
+      </div>
+
+      <div class="method-block">
+        <div>
+          <h3>6. RunMultiNichenetr(): 多样本、多条件的差异通讯</h3>
+          <p>
+            <code>RunMultiNichenetr()</code> 是更接近真实队列研究的设计。它不是把所有细胞混在一起比较，
+            而是把 sample 层面的重复纳入优先级判断。
+          </p>
+          <ul class="note-list">
+            <li>生物学问题：疾病组相对对照组，哪些 sender-receiver-ligand-target 轴稳定改变？</li>
+            <li>解释重点：优先相信跨样本一致、cell type 特异、receiver target genes 也支持的信号。</li>
+          </ul>
+          <details>
+            <summary>关键参数怎么理解</summary>
+            <div class="details-body">
+              <table>
+                <tbody>
+                  <tr><td><code>sample.by</code></td><td>真实样本 ID，是多样本统计的核心。</td></tr>
+                  <tr><td><code>condition.by</code></td><td>实验条件列，例如 disease/control。</td></tr>
+                  <tr><td><code>condition_oi/reference</code></td><td>指定关注条件和参考条件。</td></tr>
+                  <tr><td><code>receiver_celltypes</code></td><td>重点解释哪些接收细胞类型。</td></tr>
+                  <tr><td><code>sender_celltypes</code></td><td>候选发送细胞；为空时使用可用细胞群。</td></tr>
+                  <tr><td><code>batches/covariates</code></td><td>批次和协变量，避免把技术差异误读成通讯变化。</td></tr>
+                  <tr><td><code>fraction_cutoff/min_cells</code></td><td>过滤低表达或低细胞数的 sample-celltype 组合。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+        <pre><code class="language-r">srt <- RunMultiNichenetr(
+  srt,
+  group.by = "CellType",
+  sample.by = "sample_id",
+  condition.by = "condition",
+  condition_oi = "treated",
+  condition_reference = "control",
+  receiver_celltypes = "Endocrine",
+  sender_celltypes = c("Ductal", "Pre-endocrine"),
+  species = "Mus_musculus",
+  min_cells = 10,
+  empirical_pval = TRUE,
+  top_n_interactions = 250
+)
+
+CCCHeatmap(srt, method = "MultiNichenetr",
+  plot_type = "ligand_target")</code></pre>
+      </div>
+
+      <div class="callout">
+        <strong>统一出口：</strong><code>ccc_to_liana()</code> 用于把不同后端转成 LIANA-like 长表；
+        <code>ccc_to_adata()</code> 用于和 OmicVerse communication AnnData 互通。初学者先知道它们是“格式转换器”即可。
+      </div>
     </section>
 
     <section id="liana">
@@ -149,10 +463,10 @@
         <tbody>
           <tr><td>CellChat</td><td><a href="https://github.com/jinworks/CellChat">jinworks/CellChat</a></td><td><a href="https://www.nature.com/articles/s41467-021-21246-9">Jin et al., Nature Communications, 2021</a></td></tr>
           <tr><td>CellPhoneDB</td><td><a href="https://github.com/ventolab/CellphoneDB">ventolab/CellphoneDB</a> · <a href="https://cellphonedb.readthedocs.io/">documentation</a></td><td><a href="https://www.nature.com/articles/s41596-020-0292-x">Efremova et al., Nature Protocols, 2020</a></td></tr>
-          <tr><td>LIANA</td><td><a href="https://github.com/saezlab/liana">saezlab/liana</a> · <a href="https://liana-py.readthedocs.io/">LIANA+ docs</a></td><td><a href="https://www.nature.com/articles/s41556-022-00958-2">Dimitrov et al., Nature Cell Biology, 2022</a></td></tr>
+          <tr><td>LIANA</td><td><a href="https://github.com/saezlab/liana">saezlab/liana</a> · <a href="https://liana-py.readthedocs.io/">LIANA+ docs</a></td><td><a href="https://www.nature.com/articles/s41467-022-30755-0">Dimitrov et al., Nature Communications, 2022</a></td></tr>
           <tr><td>NicheNet</td><td><a href="https://github.com/saeyslab/nichenetr">saeyslab/nichenetr</a></td><td><a href="https://www.nature.com/articles/s41592-019-0667-5">Browaeys et al., Nature Methods, 2020</a></td></tr>
-          <tr><td>MultiNicheNet</td><td><a href="https://github.com/saeyslab/multinichenetr">saeyslab/multinichenetr</a></td><td><a href="https://github.com/saeyslab/multinichenetr">多样本、多条件 NicheNet 扩展项目说明</a></td></tr>
-          <tr><td>scOMM</td><td><a href="https://github.com/">请按实际 scOMM 后端仓库补充</a></td><td><code>scop::RunscOMM()</code> 在此教程中作为标签预测/注释辅助，不作为 L-R 推断方法。</td></tr>
+          <tr><td>MultiNicheNet</td><td><a href="https://github.com/saeyslab/multinichenetr">saeyslab/multinichenetr</a></td><td><a href="https://www.biorxiv.org/content/10.1101/2023.06.13.544751v1">multi-sample, multi-condition NicheNet preprint</a></td></tr>
+          <tr><td>scOMM</td><td><a href="https://github.com/mereulab/scOMM">mereulab/scOMM</a></td><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC12983708/">Systematic evaluation of rare cell annotation approaches, 2025</a>；在 <code>scop</code> 中用于标签预测/注释辅助，不作为 L-R 推断方法。</td></tr>
         </tbody>
       </table>
     </section>
@@ -161,7 +475,7 @@
       <h2>scop 出图图谱</h2>
       <p>
         本节图片由 <code>scripts/build_scop_gallery.R</code> 调用 <code>scop</code> 绘图函数生成。
-        示例数据是轻量教学长表，用来展示图型，不代表真实生物学结论。
+        目前包含 34 张可直接生成的图；示例数据是轻量教学长表，用来展示图型，不代表真实生物学结论。
       </p>
       <h3>CCCHeatmap()</h3>
       <div class="gallery-grid">
@@ -183,6 +497,7 @@
         <div class="plot-card"><img src="assets/scop-gallery/circle.png"><div class="body"><h4>circle</h4><p>全局通讯网络。</p><code>CCCNetworkPlot(plot_type="circle")</code></div></div>
         <div class="plot-card"><img src="assets/scop-gallery/circle_focused.png"><div class="body"><h4>circle_focused</h4><p>保留强边的网络。</p><code>CCCNetworkPlot(plot_type="circle_focused")</code></div></div>
         <div class="plot-card"><img src="assets/scop-gallery/chord.png"><div class="body"><h4>chord</h4><p>弦图方式展示密集关系。</p><code>CCCNetworkPlot(plot_type="chord")</code></div></div>
+        <div class="plot-card"><img src="assets/scop-gallery/lr_chord.png"><div class="body"><h4>lr_chord</h4><p>指定 L-R 对的弦图。</p><code>CCCNetworkPlot(plot_type="lr_chord", pairLR.use=...)</code></div></div>
         <div class="plot-card"><img src="assets/scop-gallery/gene_chord.png"><div class="body"><h4>gene_chord</h4><p>gene-level ligand/receptor chord。</p><code>CCCNetworkPlot(plot_type="gene_chord")</code></div></div>
         <div class="plot-card"><img src="assets/scop-gallery/pathway.png"><div class="body"><h4>pathway</h4><p>聚焦一条 pathway。</p><code>CCCNetworkPlot(plot_type="pathway", signaling="NOTCH")</code></div></div>
         <div class="plot-card"><img src="assets/scop-gallery/individual_lr.png"><div class="body"><h4>individual_lr</h4><p>单个 L-R 对网络。</p><code>CCCNetworkPlot(plot_type="individual_lr")</code></div></div>
@@ -192,6 +507,7 @@
         <div class="plot-card"><img src="assets/scop-gallery/arrow.png"><div class="body"><h4>arrow</h4><p>箭头网络，方向直观。</p><code>CCCNetworkPlot(plot_type="arrow")</code></div></div>
         <div class="plot-card"><img src="assets/scop-gallery/sigmoid.png"><div class="body"><h4>sigmoid</h4><p>流线型通讯网络。</p><code>CCCNetworkPlot(plot_type="sigmoid")</code></div></div>
         <div class="plot-card"><img src="assets/scop-gallery/bipartite.png"><div class="body"><h4>bipartite</h4><p>二部图结构。</p><code>CCCNetworkPlot(plot_type="bipartite")</code></div></div>
+        <div class="plot-card"><img src="assets/scop-gallery/embedding_network.png"><div class="body"><h4>embedding_network</h4><p>把通讯边叠加到 UMAP/tSNE 空间。</p><code>CCCNetworkPlot(plot_type="embedding_network", reduction="umap")</code></div></div>
       </div>
 
       <h3>CCCStatPlot()</h3>
@@ -217,7 +533,6 @@
           <tr><td><code>matrix_dot</code></td><td><code>CCCHeatmap()</code></td><td>无</td><td>接口已移除，请用 <code>dot</code>。</td></tr>
           <tr><td><code>role_heatmap</code>, <code>role_network</code>, <code>role_network_marsilea</code></td><td><code>CCCHeatmap()</code> / <code>CCCStatPlot()</code></td><td>真实 CellChat 结果</td><td>用于 CellChat pathway role centrality。</td></tr>
           <tr><td><code>diff_heatmap</code>, <code>diff_network</code>, <code>ranknet</code>, <code>role_change</code></td><td>Heatmap/Network/Stat</td><td>CellChat 条件比较结果</td><td>需要 <code>RunCellChat(group_column=..., group_cmp=...)</code> 成功运行。</td></tr>
-          <tr><td><code>embedding_network</code></td><td><code>CCCNetworkPlot()</code></td><td>Seurat reduction</td><td>需要对象中有 UMAP/tSNE/PCA reduction。</td></tr>
           <tr><td><code>diffusion</code></td><td><code>CCCNetworkPlot()</code></td><td>当前 R 后端限制</td><td>当前 <code>scop</code> 返回提示：无直接 R backend。</td></tr>
           <tr><td><code>gene</code></td><td><code>CCCStatPlot()</code></td><td>CellChat pathway gene 表达结构</td><td>普通 LIANA 长表无法直接提供该图所需对象。</td></tr>
         </tbody>

@@ -11,6 +11,24 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 data("pancreas_sub", package = "scop")
 srt <- pancreas_sub
 
+cell_types <- sort(unique(as.character(srt$CellType)))
+theta <- seq(0, 2 * pi, length.out = length(cell_types) + 1)[seq_along(cell_types)]
+centers <- setNames(
+  lapply(seq_along(cell_types), function(i) c(cos(theta[i]), sin(theta[i]))),
+  cell_types
+)
+set.seed(11)
+embedding <- t(vapply(as.character(srt$CellType), function(type) {
+  centers[[type]] + stats::rnorm(2, sd = 0.13)
+}, numeric(2)))
+colnames(embedding) <- c("UMAP_1", "UMAP_2")
+rownames(embedding) <- colnames(srt)
+srt[["umap"]] <- SeuratObject::CreateDimReducObject(
+  embeddings = embedding,
+  key = "UMAP_",
+  assay = SeuratObject::DefaultAssay(srt)
+)
+
 lr <- data.frame(
   sender = c("Ductal", "Ductal", "Ngn3-low-EP", "Ngn3-low-EP", "Ngn3-high-EP", "Ngn3-high-EP", "Pre-endocrine", "Pre-endocrine", "Endocrine", "Endocrine", "Ductal", "Pre-endocrine", "Endocrine", "Ngn3-low-EP", "Ngn3-high-EP"),
   receiver = c("Ngn3-low-EP", "Ngn3-high-EP", "Ngn3-high-EP", "Pre-endocrine", "Pre-endocrine", "Endocrine", "Endocrine", "Ductal", "Ductal", "Ngn3-high-EP", "Endocrine", "Ngn3-low-EP", "Pre-endocrine", "Ductal", "Ductal"),
@@ -61,32 +79,57 @@ niche_long <- lr
 niche_long$method <- "Nichenetr"
 srt@tools[["Nichenetr"]] <- c(make_bundle(niche_long, "Nichenetr"), list(ligand_target_df = ligand_target_df))
 
-save_any <- function(name, obj, width = 7.2, height = 5) {
-  path <- file.path(out_dir, paste0(name, ".png"))
-  if (is.list(obj) && !inherits(obj, "ggplot")) {
-    rec_idx <- which(vapply(obj, inherits, logical(1), what = "recordedplot"))
-    if (length(rec_idx) > 0L) {
-      obj <- obj[[rec_idx[1]]]
-    }
+draw_returned_object <- function(obj) {
+  if (is.null(obj)) {
+    return(invisible(NULL))
   }
   if (inherits(obj, "recordedplot")) {
-    png(path, width = width, height = height, units = "in", res = 180, bg = "white")
     replayPlot(obj)
-    dev.off()
-  } else {
-    ggplot2::ggsave(path, obj, width = width, height = height, dpi = 180, bg = "white")
+    return(invisible(NULL))
   }
-  path
+  if (
+    inherits(obj, "ggplot") ||
+      inherits(obj, "patchwork") ||
+      inherits(obj, "wrapped_patch") ||
+      inherits(obj, "patch")
+  ) {
+    print(obj)
+    return(invisible(NULL))
+  }
+  if (is.list(obj)) {
+    for (item in obj) {
+      if (
+        inherits(item, "recordedplot") ||
+          inherits(item, "ggplot") ||
+          inherits(item, "patchwork") ||
+          inherits(item, "wrapped_patch") ||
+          inherits(item, "patch")
+      ) {
+        draw_returned_object(item)
+        return(invisible(NULL))
+      }
+    }
+  }
+  invisible(NULL)
 }
 
 run_plot <- function(name, expr, width = 7.2, height = 5) {
   message("Generating ", name)
-  out <- tryCatch(force(expr), error = function(e) e)
+  path <- file.path(out_dir, paste0(name, ".png"))
+  png(path, width = width, height = height, units = "in", res = 180, bg = "white")
+  out <- tryCatch({
+    obj <- force(expr)
+    draw_returned_object(obj)
+    obj
+  }, error = function(e) e)
+  dev.off()
   if (inherits(out, "error")) {
     message("FAILED ", name, ": ", conditionMessage(out))
+    if (file.exists(path)) {
+      unlink(path)
+    }
     return(data.frame(name = name, ok = FALSE, message = conditionMessage(out), stringsAsFactors = FALSE))
   }
-  save_any(name, out, width = width, height = height)
   data.frame(name = name, ok = TRUE, message = "", stringsAsFactors = FALSE)
 }
 
@@ -110,6 +153,7 @@ add("ligand_target", CCCHeatmap(srt, method = "Nichenetr", plot_type = "ligand_t
 add("circle", CCCNetworkPlot(srt, method = "LIANA", plot_type = "circle", display_by = "aggregation", title = "CCCNetworkPlot: circle", verbose = FALSE), 7, 5.5)
 add("circle_focused", CCCNetworkPlot(srt, method = "LIANA", plot_type = "circle_focused", display_by = "aggregation", min_interaction_threshold = .55, title = "CCCNetworkPlot: circle_focused", verbose = FALSE), 7, 5.5)
 add("chord", CCCNetworkPlot(srt, method = "LIANA", plot_type = "chord", display_by = "aggregation", top_n = 12, title = "CCCNetworkPlot: chord", verbose = FALSE), 7, 5.5)
+add("lr_chord", CCCNetworkPlot(srt, method = "LIANA", plot_type = "lr_chord", display_by = "interaction", pairLR.use = c("Jag1-Notch1", "Dll1-Notch2", "Wnt5a-Fzd2"), title = "CCCNetworkPlot: lr_chord", verbose = FALSE), 7, 5.5)
 add("gene_chord", CCCNetworkPlot(srt, method = "LIANA", plot_type = "gene_chord", display_by = "interaction", top_n = 10, title = "CCCNetworkPlot: gene_chord", verbose = FALSE), 7, 5.5)
 add("pathway", CCCNetworkPlot(srt, method = "LIANA", plot_type = "pathway", display_by = "interaction", signaling = "NOTCH", title = "CCCNetworkPlot: pathway", verbose = FALSE), 7, 5.5)
 add("individual_lr", CCCNetworkPlot(srt, method = "LIANA", plot_type = "individual_lr", display_by = "interaction", signaling = "NOTCH", pairLR.use = "Jag1-Notch1", title = "CCCNetworkPlot: individual_lr", verbose = FALSE), 7, 5.5)
@@ -119,6 +163,7 @@ add("individual_incoming", CCCNetworkPlot(srt, method = "LIANA", plot_type = "in
 add("arrow", CCCNetworkPlot(srt, method = "LIANA", plot_type = "arrow", display_by = "interaction", top_n = 12, title = "CCCNetworkPlot: arrow", verbose = FALSE), 7, 5)
 add("sigmoid", CCCNetworkPlot(srt, method = "LIANA", plot_type = "sigmoid", display_by = "interaction", top_n = 12, title = "CCCNetworkPlot: sigmoid", verbose = FALSE), 7, 5)
 add("bipartite", CCCNetworkPlot(srt, method = "LIANA", plot_type = "bipartite", display_by = "interaction", top_n = 12, title = "CCCNetworkPlot: bipartite", verbose = FALSE), 7, 5)
+add("embedding_network", CCCNetworkPlot(srt, method = "LIANA", plot_type = "embedding_network", display_by = "interaction", group.by = "CellType", reduction = "umap", top_n = 10, title = "CCCNetworkPlot: embedding_network", verbose = FALSE), 7, 5)
 add("diffusion", CCCNetworkPlot(srt, method = "LIANA", plot_type = "diffusion", display_by = "interaction", top_n = 12, title = "CCCNetworkPlot: diffusion", verbose = FALSE), 7, 5)
 
 add("bar", CCCStatPlot(srt, method = "LIANA", plot_type = "bar", display_by = "interaction", top_n = 12, title = "CCCStatPlot: bar", verbose = FALSE), 7.2, 5)

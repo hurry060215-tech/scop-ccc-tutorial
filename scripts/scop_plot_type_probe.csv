@@ -7,13 +7,11 @@ the OV-style interaction dot plot."
 "CCCHeatmap","tile",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCHeatmap","source_target_dot",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCHeatmap","source_target_tile",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
-"CCCHeatmap","sample_dot",FALSE,"rlang_error|error|condition","`sample_key` was not found in the CCC result table"
+"CCCHeatmap","sample_dot",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCHeatmap","bubble",TRUE,"patchwork|wrapped_patch|patch|ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
-"CCCHeatmap","bubble_lr",FALSE,"rlang_error|error|condition","`pairLR.use` or `interaction.use` must be provided for ""plot_type =
-'bubble_lr'"""
+"CCCHeatmap","bubble_lr",TRUE,"patchwork|wrapped_patch|patch|ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCHeatmap","pathway_bubble",TRUE,"patchwork|wrapped_patch|patch|ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
-"CCCHeatmap","ligand_target",FALSE,"rlang_error|error|condition","Ligand-target plots require NicheNet/MultiNicheNet results. Run
-`RunNichenetr()` or `RunMultiNichenetr()` first."
+"CCCHeatmap","ligand_target",TRUE,"patchwork|wrapped_patch|patch|ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCHeatmap","role_heatmap",FALSE,"rlang_error|error|condition","`plot_type` = ""role_heatmap"" is currently only supported for CellChat
 results"
 "CCCHeatmap","role_network",FALSE,"rlang_error|error|condition","`plot_type` = ""role_heatmap"" is currently only supported for CellChat
@@ -23,24 +21,22 @@ results"
 "CCCHeatmap","diff_heatmap",FALSE,"rlang_error|error|condition","`plot_type` = ""diff_heatmap"" is currently only supported for CellChat
 results"
 "CCCNetworkPlot","circle",TRUE,"recordedplot",""
-"CCCNetworkPlot","circle_focused",FALSE,"rlang_error|error|condition","""plot_type = circle_focused"" does not support: {.arg pairLR.use}"
-"CCCNetworkPlot","chord",FALSE,"rlang_error|error|condition","""plot_type = chord"" does not support: {.arg pairLR.use}"
-"CCCNetworkPlot","lr_chord",FALSE,"rlang_error|error|condition","""plot_type = lr_chord"" does not support: {.arg signaling}"
-"CCCNetworkPlot","gene_chord",FALSE,"rlang_error|error|condition","""plot_type = gene_chord"" does not support: {.arg pairLR.use}"
-"CCCNetworkPlot","pathway",FALSE,"rlang_error|error|condition","""plot_type = pathway"" does not support: {.arg pairLR.use}"
+"CCCNetworkPlot","circle_focused",TRUE,"recordedplot",""
+"CCCNetworkPlot","chord",TRUE,"recordedplot",""
+"CCCNetworkPlot","lr_chord",TRUE,"recordedplot",""
+"CCCNetworkPlot","gene_chord",TRUE,"recordedplot",""
+"CCCNetworkPlot","pathway",TRUE,"recordedplot",""
 "CCCNetworkPlot","individual_lr",TRUE,"recordedplot",""
 "CCCNetworkPlot","individual",TRUE,"recordedplot",""
-"CCCNetworkPlot","individual_outgoing",FALSE,"rlang_error|error|condition","""plot_type = individual_outgoing"" does not support: {.arg signaling},
-{.arg pairLR.use}"
-"CCCNetworkPlot","individual_incoming",FALSE,"rlang_error|error|condition","""plot_type = individual_incoming"" does not support: {.arg signaling},
-{.arg pairLR.use}"
+"CCCNetworkPlot","individual_outgoing",TRUE,"list",""
+"CCCNetworkPlot","individual_incoming",TRUE,"list",""
 "CCCNetworkPlot","arrow",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCNetworkPlot","sigmoid",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCNetworkPlot","bipartite",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
-"CCCNetworkPlot","embedding_network",FALSE,"rlang_error|error|condition","Unable to find any reductions"
+"CCCNetworkPlot","embedding_network",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCNetworkPlot","diff_network",FALSE,"rlang_error|error|condition","""plot_type = 'diff_network'"" is currently only supported for CellChat"
-"CCCNetworkPlot","diffusion",FALSE,"rlang_error|error|condition","""plot_type = diffusion"" does not support: {.arg signaling}, {.arg
-pairLR.use}"
+"CCCNetworkPlot","diffusion",FALSE,"rlang_error|error|condition","""plot_type = 'diffusion'"" has no direct R backend in scop; use
+""plot_type = 'circle'"" or ""plot_type = 'diff_network'"""
 "CCCStatPlot","bar",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCStatPlot","sankey",TRUE,"patchwork|wrapped_patch|patch|ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCStatPlot","box",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
@@ -51,9 +47,7 @@ results"
 "CCCStatPlot","role_network_marsilea",FALSE,"rlang_error|error|condition","`plot_type` = ""role_heatmap"" is currently only supported for CellChat
 results"
 "CCCStatPlot","pathway_summary",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
-"CCCStatPlot","comparison",FALSE,"rlang_error|error|condition","CCC comparison plotting requires a context column. Add one of ""sample"",
-""context"", ""condition"", or ""dataset""; pass `sample_col`; or compare a unified
-CCC table with multiple `method` values."
+"CCCStatPlot","comparison",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCStatPlot","lr_contribution",TRUE,"ggplot2::ggplot|ggplot|ggplot2::gg|S7_object|gg",""
 "CCCStatPlot","gene",FALSE,"simpleError|error|condition","object 'bundle' not found"
 "CCCStatPlot","ranknet",FALSE,"rlang_error|error|condition","`plot_type` = ""ranknet"" is currently only supported for CellChat results"
